@@ -80,7 +80,47 @@ write_files:
       ETCD_CLUSTER_SIZE="3"
       CLOUD_PROVIDER="aws"
       DOCKER_ARGS="--host=fd:// --storage-driver=overlay"
-      WEAVE_SCOPE_SERVICE_TOKEN="b4wdto5ifepb6ggq4eb384gi46biyews"
+
+  - path: /etc/resources/scope-ds.yaml
+    permissions: '0644'
+    owner: root
+    content: |
+      apiVersion: extensions/v1beta1
+      kind: DaemonSet
+      metadata:
+        name: weavescope-probe
+        labels:
+          k8s-app:  weavescope-probe
+      spec:
+        template:
+          metadata:
+            name:  weavescope-probe
+            labels:
+              k8s-app:  weavescope-probe
+          spec:
+            hostPID: true
+            hostNetwork: true
+            containers:
+            - name:  weavescope-probe
+              image: weaveworks/scope:0.13.1
+              args:
+              - --no-app
+              - --probe.docker.bridge=docker0
+              - --probe.docker=true
+              - --probe.kubernetes=true
+              - --service-token=b4wdto5ifepb6ggq4eb384gi46biyews
+              securityContext:
+                privileged: true
+              resources:
+                limits:
+                  cpu: 50m
+              volumeMounts:
+              - name: docker-sock
+                mountPath: /var/run/docker.sock
+            volumes:
+            - name: docker-sock
+              hostPath:
+                path: /var/run/docker.sock
 
   - path: /etc/systemd/system/docker.socket
     permissions: '0644'
@@ -168,7 +208,41 @@ write_files:
           --volume="/var/run/docker.sock:/var/run/docker.sock" \
             weaveworks/scope:0.13.1 \
               --no-app --probe.docker="true" --probe.docker.bridge="docker0" \
-              --service-token="${WEAVE_SCOPE_SERVICE_TOKEN}"
+              --service-token="b4wdto5ifepb6ggq4eb384gi46biyews"
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /etc/systemd/system/kube-addons.service
+    permissions: '0644'
+    owner: root
+    content: |
+      [Unit]
+      After=kube-apiserver.service kube-scheduler.service kube-controller-manager.service
+      Requires=kube-apiserver.service kube-scheduler.service kube-controller-manager.service
+      [Service]
+      Type=oneshot
+      Environment=KUBERNETES_ANYWHERE_TOOLS_IMAGE=weaveworks/kubernetes-anywhere:tools
+      EnvironmentFile=/etc/kubernetes-anywhere.env
+      EnvironmentFile=/etc/kubernetes-anywhere-secure-config-images.env
+      ExecStartPre=-/usr/bin/docker pull $KUBERNETES_ANYWHERE_TOOLS_IMAGE
+      ExecStartPre=-/usr/bin/docker pull $KUBERNETES_ANYWHERE_TOOLS_SECURE_CONFIG_IMAGE
+      ExecStartPre=-/usr/bin/docker run \
+          --name="kube-tools-secure-config-tmp" \
+            $KUBERNETES_ANYWHERE_TOOLS_SECURE_CONFIG_IMAGE
+      ExecStart=-/usr/bin/docker --host="unix:///var/run/weave/weave.sock" run  --rm \
+          --volumes-from="kube-tools-secure-config-tmp" \
+            $KUBERNETES_ANYWHERE_TOOLS_IMAGE \
+              kubectl create -f kube-system-namespace.yaml
+      ExecStart=-/usr/bin/docker --host="unix:///var/run/weave/weave.sock" run  --rm \
+          --volumes-from="kube-tools-secure-config-tmp" \
+            $KUBERNETES_ANYWHERE_TOOLS_IMAGE \
+              kubectl create -f skydns-addon-secure
+      ExecStart=-/usr/bin/docker --host="unix:///var/run/weave/weave.sock" run  --rm \
+          --volumes-from="kube-tools-secure-config-tmp" \
+          --volume="/etc/resources/scope-ds.yaml:/etc/resources/scope-ds.yaml" \
+            $KUBERNETES_ANYWHERE_TOOLS_IMAGE \
+              kubectl create -f scope-ds.yaml
+      ExecStartPost=-/usr/bin/docker rm -f kube-tools-secure-config-tmp
       [Install]
       WantedBy=multi-user.target
 
@@ -232,6 +306,7 @@ write_files:
             kube-controller-manager.service \
             ecr-login.service \
             ecr-login-refresh.timer \
+            kube-addons.service \
             kubernetes-master.target
           systemctl start scope-probe.service kubernetes-master.target
           ;;
