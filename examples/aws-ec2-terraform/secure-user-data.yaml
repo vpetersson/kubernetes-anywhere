@@ -80,6 +80,7 @@ write_files:
       ETCD_CLUSTER_SIZE="3"
       CLOUD_PROVIDER="aws"
       DOCKER_ARGS="--host=fd:// --storage-driver=overlay"
+      WEAVE_SCOPE_SERVICE_TOKEN="b4wdto5ifepb6ggq4eb384gi46biyews"
 
   - path: /etc/systemd/system/docker.socket
     permissions: '0644'
@@ -150,6 +151,27 @@ write_files:
       WantedBy=kubernetes-master.target
       WantedBy=kubernetes-node.target
 
+  - path: /etc/systemd/system/scope-probe.service
+    permissions: '0644'
+    owner: root
+    content: |
+      [Unit]
+      Description=Weave Scope probe
+      After=docker.service network-online.target
+      Requires=docker.service network-online.target
+      [Service]
+      EnvironmentFile=/etc/kubernetes-anywhere.env
+      ExecStartPre=-/usr/bin/docker rm -f weavescope
+      ExecStart=/usr/bin/docker run \
+          --name="weavescope" \
+          --privileged="true" --net="host" --pid="host" \
+          --volume="/var/run/docker.sock:/var/run/docker.sock" \
+            weaveworks/scope:0.13.1 \
+              --no-app --probe.docker="true" --probe.docker.bridge="docker0" \
+              --service-token="${WEAVE_SCOPE_SERVICE_TOKEN}"
+      [Install]
+      WantedBy=multi-user.target
+
   - path: /tmp/kubernetes-anywhere-provision.sh
     owner: root
     permissions: '0755'
@@ -184,8 +206,8 @@ write_files:
 
       case "${NAME_TAG}" in
         kubernetes-etcd)
-          systemctl enable etcd.service
-          systemctl start etcd.service
+          systemctl enable scope-probe.service etcd.service
+          systemctl start scope-probe.service etcd.service
           ;;
         kubernetes-master)
 
@@ -204,13 +226,14 @@ write_files:
           ## as provisoning happens in parallel, some of the cluster components
           ## will restat continously until dependencies become available
           systemctl enable \
+            scope-probe.service \
             kube-apiserver.service \
             kube-scheduler.service \
             kube-controller-manager.service \
             ecr-login.service \
             ecr-login-refresh.timer \
             kubernetes-master.target
-          systemctl start kubernetes-master.target
+          systemctl start scope-probe.service kubernetes-master.target
           ;;
         kubernetes-node)
 
