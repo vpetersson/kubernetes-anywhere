@@ -244,7 +244,7 @@ write_files:
               kubectl create -f scope-ds.yaml
       ExecStartPost=-/usr/bin/docker rm -f kube-tools-secure-config-tmp
       [Install]
-      WantedBy=multi-user.target
+      WantedBy=kubernetes-master.target
 
   - path: /tmp/kubernetes-anywhere-provision.sh
     owner: root
