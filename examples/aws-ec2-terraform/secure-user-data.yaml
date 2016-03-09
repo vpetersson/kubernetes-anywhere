@@ -221,6 +221,7 @@ write_files:
       Requires=kube-apiserver.service kube-scheduler.service kube-controller-manager.service
       [Service]
       Type=oneshot
+      ConditionPathExists=!/var/log/kubernetes-anywhere-addons-created
       Environment=KUBERNETES_ANYWHERE_TOOLS_IMAGE=weaveworks/kubernetes-anywhere:tools
       EnvironmentFile=/etc/kubernetes-anywhere.env
       EnvironmentFile=/etc/kubernetes-anywhere-secure-config-images.env
@@ -232,17 +233,18 @@ write_files:
       ExecStart=-/usr/bin/docker --host="unix:///var/run/weave/weave.sock" run  --rm \
           --volumes-from="kube-tools-secure-config-tmp" \
             $KUBERNETES_ANYWHERE_TOOLS_IMAGE \
-              kubectl create -f kube-system-namespace.yaml
+              bash -c "until kubectl create -f kube-system-namespace.yaml ; do sleep 2 ; done"
       ExecStart=-/usr/bin/docker --host="unix:///var/run/weave/weave.sock" run  --rm \
           --volumes-from="kube-tools-secure-config-tmp" \
             $KUBERNETES_ANYWHERE_TOOLS_IMAGE \
-              kubectl create -f skydns-addon-secure
+              bash -c "until kubectl create -f skydns-addon-secure ; do sleep 2 ; done"
       ExecStart=-/usr/bin/docker --host="unix:///var/run/weave/weave.sock" run  --rm \
           --volumes-from="kube-tools-secure-config-tmp" \
           --volume="/etc/resources/scope-ds.yaml:/etc/resources/scope-ds.yaml" \
             $KUBERNETES_ANYWHERE_TOOLS_IMAGE \
-              kubectl create -f scope-ds.yaml
+              bash -c "until kubectl create -f scope-ds.yaml ; do sleep 2 ; done"
       ExecStartPost=-/usr/bin/docker rm -f kube-tools-secure-config-tmp
+      ExecStartPost=/bin/touch /var/log/kubernetes-anywhere-addons-created
       [Install]
       WantedBy=kubernetes-master.target
 
